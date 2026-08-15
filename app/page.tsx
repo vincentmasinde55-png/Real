@@ -10,7 +10,6 @@ const REDIRECT_URI = process.env.NEXT_PUBLIC_DERIV_REDIRECT_URI || '';
 const LEGACY_APP_ID = process.env.NEXT_PUBLIC_DERIV_LEGACY_APP_ID || '';
 
 type Account = { account_id:string; balance:number; currency:string; account_type:'demo'|'real'; status:string };
-
 type Tick = { epoch:number; quote:number };
 
 function base64Url(bytes: Uint8Array){let s='';for(const b of bytes)s+=String.fromCharCode(b);return btoa(s).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');}
@@ -29,20 +28,16 @@ export default function Home(){
   {kind:'category',name:'Utility',colour:'#9b6ad6',contents:[{kind:'block',type:'text'},{kind:'block',type:'text_print'}]}
  ]}),[]);
 
+ useEffect(()=>{const saved=sessionStorage.getItem('deriv_token');if(saved)setToken(saved)},[]);
  useEffect(()=>{if(!blocklyRef.current)return; const ws=Blockly.inject(blocklyRef.current,{toolbox,grid:{spacing:20,length:3,colour:'#20344b',snap:true},zoom:{controls:true,wheel:true,startScale:.9,maxScale:1.5,minScale:.55},trashcan:true}); const root=ws.newBlock('controls_if');root.initSvg();root.render();root.setPosition(40,40); return()=>ws.dispose();},[toolbox]);
-
  useEffect(()=>{const draw=()=>{const c=chartRef.current;if(!c)return;const d=devicePixelRatio||1,r=c.getBoundingClientRect();c.width=r.width*d;c.height=r.height*d;const x=c.getContext('2d');if(!x)return;x.scale(d,d);x.clearRect(0,0,r.width,r.height);x.strokeStyle='#17304b';x.lineWidth=1;for(let i=1;i<6;i++){const y=i*r.height/6;x.beginPath();x.moveTo(0,y);x.lineTo(r.width,y);x.stroke()}if(ticks.length<2)return;const vals=ticks.map(t=>t.quote),min=Math.min(...vals),max=Math.max(...vals),span=max-min||1;x.strokeStyle='#38a0ff';x.lineWidth=2;x.beginPath();vals.forEach((v,i)=>{const px=i*(r.width/(vals.length-1));const py=r.height-22-((v-min)/span)*(r.height-42);i?x.lineTo(px,py):x.moveTo(px,py)});x.stroke();};draw();window.addEventListener('resize',draw);return()=>window.removeEventListener('resize',draw)},[ticks]);
-
- useEffect(()=>{if(!token)return;fetch(`${API}/trading/v1/options/accounts`,{headers:{'Deriv-App-ID':CLIENT_ID,Authorization:`Bearer ${token}`}}).then(r=>r.json()).then(j=>{const list=(j.data||[]).flat?j.data.flat():[];setAccounts(list);setAccount(list.find((a:Account)=>a.account_type==='demo')||list[0]||null);log(`Loaded ${list.length} Deriv account(s).`)}).catch(e=>log(`Account error: ${e.message}`));},[token]);
-
+ useEffect(()=>{if(!token)return;sessionStorage.setItem('deriv_token',token);fetch(`${API}/trading/v1/options/accounts`,{headers:{'Deriv-App-ID':CLIENT_ID,Authorization:`Bearer ${token}`}}).then(r=>r.json()).then(j=>{const list=Array.isArray(j.data)?j.data:[];setAccounts(list);setAccount(list.find((a:Account)=>a.account_type==='demo')||list[0]||null);log(`Loaded ${list.length} Deriv account(s).`)}).catch(e=>log(`Account error: ${e.message}`));},[token]);
  useEffect(()=>{const ws=new WebSocket('wss://api.derivws.com/trading/v1/options/ws/public');wsRef.current=ws;ws.onopen=()=>{ws.send(JSON.stringify({ticks:symbol,subscribe:1,req_id:10}));setConnected(true)};ws.onmessage=e=>{const j=JSON.parse(e.data);if(j.tick){setTicks(v=>[...v.slice(-119),{epoch:j.tick.epoch,quote:Number(j.tick.quote)}])}};ws.onclose=()=>setConnected(false);return()=>ws.close()},[symbol]);
-
  function log(s:string){setLogs(v=>[`${new Date().toLocaleTimeString()}  ${s}`,...v].slice(0,100))}
  async function login(){if(!CLIENT_ID||!REDIRECT_URI){alert('Set NEXT_PUBLIC_DERIV_CLIENT_ID and NEXT_PUBLIC_DERIV_REDIRECT_URI in Vercel first.');return}const {verifier,challenge}=await pkce();const state=crypto.randomUUID();sessionStorage.setItem('pkce_verifier',verifier);sessionStorage.setItem('oauth_state',state);const q=new URLSearchParams({response_type:'code',client_id:CLIENT_ID,redirect_uri:REDIRECT_URI,scope:'trade',state,code_challenge:challenge,code_challenge_method:'S256'});if(LEGACY_APP_ID)q.set('app_id',LEGACY_APP_ID);location.href=`https://auth.deriv.com/oauth2/auth?${q}`}
- function logout(){setToken('');setAccounts([]);setAccount(null);sessionStorage.removeItem('deriv_token');log('Disconnected.');}
+ function logout(){setToken('');setAccounts([]);setAccount(null);sessionStorage.removeItem('deriv_token');log('Disconnected.')}
  async function trade(){if(!account||!token){log('Connect a Deriv account first.');return}setRunning(true);try{const otpRes=await fetch(`${API}/trading/v1/options/accounts/${account.account_id}/otp`,{method:'POST',headers:{'Deriv-App-ID':CLIENT_ID,Authorization:`Bearer ${token}`}});const otp=await otpRes.json();if(!otpRes.ok)throw new Error(JSON.stringify(otp));const ws=new WebSocket(otp.data.url);ws.onopen=()=>{ws.send(JSON.stringify({proposal:1,amount:Number(stake),basis:'stake',contract_type:contract,currency:account.currency,duration:Number(duration),duration_unit:unit,underlying_symbol:symbol,subscribe:1,req_id:21}))};ws.onmessage=e=>{const j=JSON.parse(e.data);if(j.proposal){log(`Proposal received: ${j.proposal.id}`);ws.send(JSON.stringify({buy:j.proposal.id,price:Number(stake),req_id:22}))}else if(j.buy){log(`Contract purchased: ${j.buy.contract_id}`);setJournal(`BUY ${j.buy.contract_id} • ${symbol} • ${contract}`)}else if(j.error){log(`Trade error: ${j.error.message}`);ws.close();setRunning(false)}};ws.onerror=()=>{log('Trading WebSocket error.');setRunning(false)};ws.onclose=()=>setRunning(false)}catch(e:any){log(`Trade failed: ${e.message}`);setRunning(false)}}
  function generate(){const ws=Blockly.getMainWorkspace();if(!ws)return;try{setJournal(javascriptGenerator.workspaceToCode(ws)||'No executable blocks yet.');log('Generated strategy code from Blockly workspace.')}catch(e:any){log(`Generator error: ${e.message}`)}}
-
  return <div className="app">
   <header className="topbar"><div className="brand">Real <span>Deriv Bot</span></div><div className="status">{connected?'● Market stream live':'○ Market stream offline'}</div><div className="grow"/><div className="status">{account?`${account.account_type.toUpperCase()} • ${account.currency} ${Number(account.balance).toFixed(2)}`:'Not connected'}</div>{token?<button className="btn" onClick={logout}>Disconnect</button>:<button className="btn primary" onClick={login}>Login with Deriv</button>}</header>
   <main className="workspace">
@@ -52,5 +47,3 @@ export default function Home(){
   </main><footer className="bottom"><span>Real workspace</span><span>Blockly strategy engine</span><span>Deriv WebSocket market stream</span><span>API: {API.replace('https://','')}</span></footer>
  </div>
 }
-
-function Callback(){return null}
