@@ -1,0 +1,91 @@
+name: Build Real from Deriv Trading Bot Template
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Real
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch official Deriv trading bot template
+        run: |
+          git clone --depth 1 https://github.com/deriv-com/trading-bot-template.git /tmp/deriv-bot
+          rm -rf /tmp/deriv-bot/.git
+
+      - name: Replace Real with official template
+        run: |
+          mkdir -p /tmp/real-preserve/.github/workflows
+          cp .github/workflows/sync-deriv-bot.yml /tmp/real-preserve/sync-deriv-bot.yml
+          rm -rf ./* ./.??* 2>/dev/null || true
+          cp -R /tmp/deriv-bot/. .
+          mkdir -p .github/workflows
+          cp /tmp/real-preserve/sync-deriv-bot.yml .github/workflows/sync-deriv-bot.yml
+
+      - name: Apply Real branding and Vercel configuration
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path('brand.config.json')
+          if p.exists():
+              data=json.loads(p.read_text())
+              def walk(x):
+                  if isinstance(x,dict):
+                      for k,v in list(x.items()):
+                          lk=k.lower()
+                          if isinstance(v,str):
+                              if lk in ('brand_name','brandname','name') and 'brand' in lk:
+                                  x[k]='Real'
+                              elif 'hostname' in lk and 'production' in lk:
+                                  x[k]='real.vercel.app'
+                              elif lk in ('primary','primary_color','primarycolour'):
+                                  x[k]='#0b1f3a'
+                          else: walk(v)
+                  elif isinstance(x,list):
+                      for v in x: walk(v)
+              walk(data)
+              p.write_text(json.dumps(data,indent=2)+'\n')
+          PY
+          cat > .env.example <<'EOF'
+          # Deriv OAuth 2.0 client ID registered in developers.deriv.com
+          CLIENT_ID=
+          # Optional legacy V1 app ID; leave empty for a new OAuth-only app
+          APP_ID=
+          EOF
+          cat > vercel.json <<'EOF'
+          {
+            "buildCommand": "npm run build",
+            "outputDirectory": "dist",
+            "framework": null
+          }
+          EOF
+          cat > VERCEL_ENV.md <<'EOF'
+          # Vercel environment variables
+
+          Add these in Vercel Project Settings → Environment Variables:
+
+          `CLIENT_ID` = the OAuth 2.0 Client ID from your Deriv Developer Dashboard.
+
+          `APP_ID` = optional legacy Deriv V1 App ID. Leave empty unless you maintain a legacy application.
+
+          The official template handles the Deriv OAuth 2.0 + PKCE flow, callback, authenticated WebSocket connection, bot runtime, Blockly blocks, SmartCharts and account/trading integration. The production hostname in `brand.config.json` must match the domain registered as the OAuth redirect URL.
+          EOF
+
+      - name: Commit generated application
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet && exit 0
+          git commit -m "feat: build Real from official Deriv trading bot template [skip ci]"
+          git push origin main
