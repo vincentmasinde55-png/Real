@@ -1,4 +1,4 @@
-name: Build Real from Deriv Trading Bot Template
+name: Build Real from official Deriv Bot
 
 on:
   push:
@@ -17,12 +17,12 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Fetch official Deriv trading bot template
+      - name: Fetch official Deriv Bot source
         run: |
-          git clone --depth 1 https://github.com/deriv-com/trading-bot-template.git /tmp/deriv-bot
+          git clone --depth 1 --branch master https://github.com/deriv-com/bot.git /tmp/deriv-bot
           rm -rf /tmp/deriv-bot/.git
 
-      - name: Replace Real with official template
+      - name: Replace application with official Deriv Bot source
         run: |
           mkdir -p /tmp/real-preserve/.github/workflows
           cp .github/workflows/sync-deriv-bot.yml /tmp/real-preserve/sync-deriv-bot.yml
@@ -31,61 +31,39 @@ jobs:
           mkdir -p .github/workflows
           cp /tmp/real-preserve/sync-deriv-bot.yml .github/workflows/sync-deriv-bot.yml
 
-      - name: Apply Real branding and Vercel configuration
+      - name: Add Vercel deployment configuration
         run: |
-          python3 - <<'PY'
-          import json
-          from pathlib import Path
-          p=Path('brand.config.json')
-          if p.exists():
-              data=json.loads(p.read_text())
-              def walk(x):
-                  if isinstance(x,dict):
-                      for k,v in list(x.items()):
-                          lk=k.lower()
-                          if isinstance(v,str):
-                              if lk in ('brand_name','brandname','name') and 'brand' in lk:
-                                  x[k]='Real'
-                              elif 'hostname' in lk and 'production' in lk:
-                                  x[k]='real.vercel.app'
-                              elif lk in ('primary','primary_color','primarycolour'):
-                                  x[k]='#0b1f3a'
-                          else: walk(v)
-                  elif isinstance(x,list):
-                      for v in x: walk(v)
-              walk(data)
-              p.write_text(json.dumps(data,indent=2)+'\n')
-          PY
-          cat > .env.example <<'EOF'
-          # Deriv OAuth 2.0 client ID registered in developers.deriv.com
-          CLIENT_ID=
-          # Optional legacy V1 app ID; leave empty for a new OAuth-only app
-          APP_ID=
-          EOF
           cat > vercel.json <<'EOF'
           {
             "buildCommand": "npm run build",
             "outputDirectory": "dist",
-            "framework": null
+            "framework": null,
+            "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }]
           }
           EOF
           cat > VERCEL_ENV.md <<'EOF'
-          # Vercel environment variables
+          # Real — Vercel setup
 
-          Add these in Vercel Project Settings → Environment Variables:
+          This project is based on the official Deriv Bot source. The application contains the real dashboard, Bot Builder, Quick Strategy, Chart, Journal, Transactions, bot runtime and Deriv authentication architecture.
 
-          `CLIENT_ID` = the OAuth 2.0 Client ID from your Deriv Developer Dashboard.
+          ## Vercel
 
-          `APP_ID` = optional legacy Deriv V1 App ID. Leave empty unless you maintain a legacy application.
+          Build command: `npm run build`
+          Output directory: `dist`
+          Framework preset: `Other`
 
-          The official template handles the Deriv OAuth 2.0 + PKCE flow, callback, authenticated WebSocket connection, bot runtime, Blockly blocks, SmartCharts and account/trading integration. The production hostname in `brand.config.json` must match the domain registered as the OAuth redirect URL.
+          ## Environment variables
+
+          The official Deriv Bot source has environment-specific configuration and authentication configuration in its source tree. Do not invent or rename variables. Configure the values required by the checked-in configuration for the production environment, especially the Deriv OAuth/OIDC client configuration and any API/analytics variables used by the build.
+
+          Never commit access tokens, refresh tokens, client secrets or private credentials.
           EOF
 
-      - name: Commit generated application
+      - name: Commit official Deriv Bot build
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
           git diff --cached --quiet && exit 0
-          git commit -m "feat: build Real from official Deriv trading bot template [skip ci]"
+          git commit -m "feat: rebuild Real from official Deriv Bot source [skip ci]"
           git push origin main
