@@ -1,4 +1,4 @@
-name: Build Real from official Deriv Bot
+name: Import dbot-v2 into Real
 
 on:
   push:
@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 jobs:
-  sync:
+  import-dbot-v2:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Real
@@ -17,22 +17,31 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Fetch official Deriv Bot source
-        run: |
-          git clone --depth 1 --branch master https://github.com/deriv-com/bot.git /tmp/deriv-bot
-          rm -rf /tmp/deriv-bot/.git
+      - name: Clone Danielandeche/dbot--v2
+        run: git clone --depth 1 --branch master https://github.com/Danielandeche/dbot--v2.git /tmp/dbot-v2
 
-      - name: Replace application with official Deriv Bot source
+      - name: Replace Real source with dbot-v2
         run: |
-          mkdir -p /tmp/real-preserve/.github/workflows
-          cp .github/workflows/sync-deriv-bot.yml /tmp/real-preserve/sync-deriv-bot.yml
-          rm -rf ./* ./.??* 2>/dev/null || true
-          cp -R /tmp/deriv-bot/. .
+          cp .github/workflows/sync-deriv-bot.yml /tmp/sync-deriv-bot.yml
+          rsync -a --delete --exclude='.git/' /tmp/dbot-v2/ ./
           mkdir -p .github/workflows
-          cp /tmp/real-preserve/sync-deriv-bot.yml .github/workflows/sync-deriv-bot.yml
+          cp /tmp/sync-deriv-bot.yml .github/workflows/sync-deriv-bot.yml
 
-      - name: Add Vercel deployment configuration
+      - name: Configure Real branding and Vercel deployment
         run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path('brand.config.json')
+          if p.exists():
+              data=json.loads(p.read_text())
+              # Keep the template's full configuration; only replace obvious white-label identity fields.
+              for k in ('brand_name','brandName','platform_name','platformName'):
+                  if k in data and isinstance(data[k], str): data[k]='Real'
+              for k in ('production_hostname','productionHostname','hostname'):
+                  if k in data and isinstance(data[k], str): data[k]='real.vercel.app'
+              p.write_text(json.dumps(data, indent=2)+'\n')
+          PY
           cat > vercel.json <<'EOF'
           {
             "buildCommand": "npm run build",
@@ -42,28 +51,25 @@ jobs:
           }
           EOF
           cat > VERCEL_ENV.md <<'EOF'
-          # Real — Vercel setup
+          # Real / dbot-v2 Vercel configuration
 
-          This project is based on the official Deriv Bot source. The application contains the real dashboard, Bot Builder, Quick Strategy, Chart, Journal, Transactions, bot runtime and Deriv authentication architecture.
+          Base application: Danielandeche/dbot--v2.
 
-          ## Vercel
+          Vercel:
+          - Framework preset: Other
+          - Build command: npm run build
+          - Output directory: dist
 
-          Build command: `npm run build`
-          Output directory: `dist`
-          Framework preset: `Other`
+          Configure the Deriv OAuth client ID and any other variables required by the checked-in `brand.config.json` / application configuration. The OAuth redirect URL registered in Deriv must exactly match the production URL used by Real.
 
-          ## Environment variables
-
-          The official Deriv Bot source has environment-specific configuration and authentication configuration in its source tree. Do not invent or rename variables. Configure the values required by the checked-in configuration for the production environment, especially the Deriv OAuth/OIDC client configuration and any API/analytics variables used by the build.
-
-          Never commit access tokens, refresh tokens, client secrets or private credentials.
+          Never commit access tokens, refresh tokens, client secrets or other private credentials.
           EOF
 
-      - name: Commit official Deriv Bot build
+      - name: Commit imported dbot-v2 source
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
           git diff --cached --quiet && exit 0
-          git commit -m "feat: rebuild Real from official Deriv Bot source [skip ci]"
+          git commit -m "feat: import Danielandeche dbot-v2 into Real [skip ci]"
           git push origin main
